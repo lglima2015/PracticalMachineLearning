@@ -1,0 +1,163 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Luis Guilherme Pereira Lima"
+date: "Sunday, October 18, 2015"
+output: html_document
+---
+
+### Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+### Required Libraries
+```{r warning=FALSE, message=FALSE}
+require(dplyr)
+require(mlbench)
+require(caret)
+require(randomForest)
+require(corrplot)
+
+```
+### Get the Data
+Let's download training set and testing set.
+```{r}
+if (!file.exists("pml-training.csv")){
+    download.file(url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+              , destfile ="pml-training.csv")
+}
+if (!file.exists("pml-testing.csv")){
+  download.file(url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+              , destfile ="pml-testing.csv")  
+}
+```
+Loading datasets in R and replace worng values with NAs
+```{r}
+training <- read.csv("pml-training.csv", na.strings=c("","NA","#DIV/0!"))
+testing <- read.csv("pml-testing.csv", , na.strings=c("","NA","#DIV/0!"))
+
+```
+
+#### Clean the data
+
+Checking for missing values 
+```{r}
+str(training)
+```
+There's a lot of missing values! We need remove the collumns that contain NAs Values
+```{r}
+getCollumnsWithoutNA <- function(data){
+    collumns <- c()
+    col <- dim(data)[2]
+    for (i in seq(1:col)){
+        nas <- sum(is.na(data[,i]))
+        if (nas == 0) {
+            collumns <- c(collumns ,i)
+        }
+    }
+    collumns
+}
+collumns <- getCollumnsWithoutNA(training)
+training <- select(training, collumns)
+```
+
+Now, we need remove non-important collumns that do not come from accelerometer measurements like X, raw_timestamps and num_window collumns.
+
+```{r}
+training <- training[, -c(1:7)]
+
+```
+
+### Exploratory Analysis
+
+OK! it's time to explore the data. On this step, we are searching for correlations between features of data.
+
+#### Find correlations and discard high correlated features
+```{r}
+correlationMatrix <- cor(select(training, -classe))
+```
+
+Let' make a correlation graph to better understanding.
+
+```{r}
+corrplot(correlationMatrix, method = "color", type="lower", order="hclust", tl.cex = 0.75, tl.col="black", tl.srt = 45)
+```
+
+Saving the most correlated variables to remove from training set ( > 0.75)
+
+```{r}
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.75)
+training_data <- select(training, -highlyCorrelated)
+summary(training_data)
+```
+
+Now, the dimension of training set is:
+
+```{r}
+dim(training_data)
+```
+### Build the Model
+
+Before create the model, we will create a cross validation partition for training set. 20% for test and 80% fro training:
+
+```{r}
+
+
+tControl <- trainControl(method="cv", number = 5)
+
+```
+
+Now, create the model an training with dataset.
+We are using Random forests model. the RF build lots of bushy trees, and then average them to reduce the variance. 
+
+
+```{r}
+set.seed(123)
+
+if (file.exists("rfmodel001.rds")){
+    rfmodel <- readRDS("rfmodel001.rds")
+} else{
+    unloadNamespace("dplyr")
+    tControl <- trainControl(method="cv", number = 5)
+    rfmodel <- train(classe ~ ., data = training_data, 
+                 method="rf", 
+                 trControl=tControl, 
+                 prox=TRUE)
+    saveRDS(rfmodel, "rfmodel001.rds")
+}
+
+```
+
+#### Estimate variable importance
+```{r}
+importance <- varImp(rfmodel, scale=FALSE)
+plot(importance)
+
+
+```
+
+The graph shows a rank of variable importance. We can see on the top, that most principal variables that influences the outcomes and contribute to discriminate the data among the classes.
+
+### Result
+```{r}
+rfmodel$finalModel
+```
+
+Finnaly, The Random Forest model shows OOB estimate of error rate: 0.57% for the training data. the out of sample error is:
+
+```{r}
+1 - rfmodel$results$Accuracy[1]
+```
+Seems very promising!
+
+Predict classes for Testing set
+```{r warning=FALSE}
+require(dplyr)
+testing <- select(testing, collumns)
+testing <- testing[, -c(1:7)]
+predict(rfmodel, testing)
+
+```
+### Conclusion
+
+We found that the model achieved an excellent performance. The correlation-based select feature method was significant to reduce the time spent on training data. So, for this problem, it was not necessary to build other models based on other algorithms of machine learning.
+
+
